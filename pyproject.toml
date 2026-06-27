@@ -1,0 +1,14 @@
+[project]
+name = "comfyui-arrssenne"
+description = "Collection personnelle de custom nodes pour ComfyUI (arrssenne)."
+version = "0.0.1"
+license = { file = "LICENSE" }
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/arrssenne/comfyui-arrssenne"
+
+[tool.comfy]
+PublisherId = "arrssenne"
+DisplayName = "ComfyUI-Arrssenne"
+Icon = ""
