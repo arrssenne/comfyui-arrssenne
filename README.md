@@ -34,4 +34,10 @@ comfyui-Arrssenne/
 | **Switch from any 3-way** | `Arrssenne/Switch` | Route une entrée `any` vers 1 des 3 sorties (`1`/`2`/`3`) selon un entier `select` (1-3) | Extension de `CSwitchFromAny` (idem, MIT) — sorties renommables sur le canvas (clic droit → Rename), ex. Detailler/Faceswap/Saveas |
 
 ### À savoir : sorties non sélectionnées
-Les sorties non choisies renvoient un `ExecutionBlocker` (pas `None`) : les nœuds branchés sur ces sorties ne s'exécutent simplement pas, au lieu de planter. C'est nécessaire parce que tout `SaveImage`/`PreviewImage` du graphe s'exécute à ch
+Les sorties non choisies renvoient un `ExecutionBlocker` (pas `None`) : les nœuds branchés sur ces sorties ne s'exécutent simplement pas, au lieu de planter. C'est nécessaire parce que tout `SaveImage`/`PreviewImage` du graphe s'exécute à chaque run dans ComfyUI, peu importe le switch.
+
+## Ajouter un nœud adapté d'un autre pack
+
+1. Ajouter la classe dans `src/comfyui_arrssenne/nodes.py`.
+2. L'enregistrer dans `NODE_CLASS_MAPPINGS` / `NODE_DISPLAY_NAME_MAPPINGS` (même fichier).
+3. Documenter la source + licence dans le tableau ci-dessus et dans `THIRD_PARTY_NOTICES.md`.
