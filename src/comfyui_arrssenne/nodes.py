@@ -692,6 +692,68 @@ class CardOverlay:
         return out, full_name, price_str, stars
 
 
+LATENT_PRESET_CUSTOM = "Personnalisé"
+LATENT_PRESETS = [
+    "896x1152 — Portrait 3:4",
+    "1216x832 — Paysage 3:2",
+    "1024x1024 — Carré 1:1",
+    LATENT_PRESET_CUSTOM,
+]
+LATENT_PRESET_RE = re.compile(r"^\s*(\d+)\s*x\s*(\d+)")
+
+
+def parse_preset_dimensions(preset):
+    """Extract (width, height) from a preset label starting with "WxH".
+    Returns None if the label has no leading WxH (e.g. "Personnalisé").
+    Pure function, testable outside ComfyUI.
+    """
+    m = LATENT_PRESET_RE.match(preset)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+class EmptyLatentPreset:
+    """EmptyLatentImage variant with a preset dropdown: three common
+    resolutions (labelled with orientation and aspect ratio) plus a
+    "Personnalisé" entry that uses the custom_width/custom_height widgets
+    instead. batch_size always applies.
+
+    The dimensions of a preset are parsed straight from its label
+    ("896x1152 — Portrait 3:4" -> 896x1152), so the label list is the
+    single source of truth. custom_width/custom_height are ignored unless
+    the preset is "Personnalisé" (100% Python: they stay visible either
+    way).
+
+    Original node; delegates latent creation to the builtin
+    nodes.EmptyLatentImage (no reimplementation).
+    """
+
+    CATEGORY = "Arrssenne/Latent"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "preset": (LATENT_PRESETS, {"default": LATENT_PRESETS[0]}),
+                "custom_width": ("INT", {"default": 896, "min": 16, "max": 16384, "step": 8}),
+                "custom_height": ("INT", {"default": 1152, "min": 16, "max": 16384, "step": 8}),
+                "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "execute"
+
+    def execute(self, preset, custom_width, custom_height, batch_size):
+        from nodes import EmptyLatentImage as _EmptyLatentImage
+
+        dims = parse_preset_dimensions(preset)
+        width, height = dims if dims else (custom_width, custom_height)
+        logger.debug("EmptyLatentPreset: %s -> %sx%s (batch %s)", preset, width, height, batch_size)
+        return _EmptyLatentImage().generate(width, height, batch_size)
+
+
 NODE_CLASS_MAPPINGS = {
     "ArrssenneSwitchFromAny": SwitchFromAny,
     "ArrssenneSwitchFromAny3": SwitchFromAny3,
@@ -700,6 +762,7 @@ NODE_CLASS_MAPPINGS = {
     "ArrssenneLoaderCkpt": LoaderCkpt,
     "ArrssenneLoadImageFace": LoadImageFace,
     "ArrssenneCardOverlay": CardOverlay,
+    "ArrssenneEmptyLatentPreset": EmptyLatentPreset,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -710,4 +773,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ArrssenneLoaderCkpt": "Loader ckpt+lora (Arrssenne)",
     "ArrssenneLoadImageFace": "Load image FACE + path (Arrssenne)",
     "ArrssenneCardOverlay": "Card overlay (Arrssenne)",
+    "ArrssenneEmptyLatentPreset": "Empty Latent presets (Arrssenne)",
 }
