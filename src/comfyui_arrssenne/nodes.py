@@ -294,6 +294,82 @@ class Loader:
         return model, clip, vae, cleaned, ckpt_name
 
 
+class LoaderCkpt:
+    """All-in-one loader for checkpoints that embed their own CLIP and VAE:
+    checkpoint + LoRA tags parsed from the prompt text (Forge-style), in
+    one node — no clip_name/clip_type/vae_name selection widgets.
+
+    Companion to ArrssenneLoader (which loads an external CLIP/VAE for
+    checkpoints like Krea2 that lack a usable embedded text encoder). Use
+    this one when the checkpoint is self-contained (SDXL/Illustrious/Pony
+    style): the CLIP and VAE outputs come straight from inside the
+    checkpoint file (output_vae/output_clip=True).
+
+    Every <lora:name[:strength[:strength_clip]]> tag found in `text` is
+    applied to MODEL+CLIP (via the builtin LoraLoader, so caching works)
+    and removed from the `text` output. Unresolvable tags are logged and
+    skipped, never fatal.
+
+    Outputs: MODEL, CLIP, VAE, text (tags stripped), checkpoint_name (raw,
+    for Filename ckpt+seed and Image Saver Metadata) — same signature as
+    ArrssenneLoader, so the two are drop-in swappable in a workflow.
+
+    Original node. LoRA-tag-in-prompt concept inspired by
+    badjeff/comfyui_lora_tag_loader; implementation written from scratch on
+    ComfyUI builtin APIs (folder_paths, comfy.sd, nodes.LoraLoader).
+    """
+
+    CATEGORY = "Arrssenne/Loaders"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        import folder_paths
+
+        return {
+            "required": {
+                "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
+                "text": ("STRING", {"forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE", "STRING", "STRING")
+    RETURN_NAMES = ("MODEL", "CLIP", "VAE", "text", "checkpoint_name")
+    FUNCTION = "execute"
+
+    def execute(self, ckpt_name, text):
+        import comfy.sd
+        import folder_paths
+        from nodes import LoraLoader
+
+        ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", ckpt_name)
+        model, clip, vae = comfy.sd.load_checkpoint_guess_config(
+            ckpt_path,
+            output_vae=True,
+            output_clip=True,
+            embedding_directory=folder_paths.get_folder_paths("embeddings"),
+        )[:3]
+        if clip is None:
+            raise RuntimeError(
+                f"Arrssenne Loader ckpt: le checkpoint '{ckpt_name}' ne contient pas de "
+                "CLIP utilisable — utiliser 'Loader ckpt+clip+vae+lora (Arrssenne)' "
+                "avec un CLIP externe."
+            )
+
+        tags, cleaned = parse_lora_tags(text)
+        if tags:
+            lora_files = folder_paths.get_filename_list("loras")
+            lora_loader = LoraLoader()
+            for name, sm, sc in tags:
+                lora_file = resolve_lora_file(name, lora_files)
+                if lora_file is None:
+                    logger.warning("Arrssenne Loader ckpt: LoRA introuvable, tag ignore: <lora:%s>", name)
+                    continue
+                model, clip = lora_loader.load_lora(model, clip, lora_file, sm, sc)
+                logger.info("Arrssenne Loader ckpt: LoRA applique: %s (model=%s, clip=%s)", lora_file, sm, sc)
+
+        return model, clip, vae, cleaned, ckpt_name
+
+
 def face_image_stem(image):
     """Extract the bare name (no folder, no extension, no ComfyUI
     " [input]"/" [output]"/" [temp]" annotation) from a LoadImage widget
@@ -621,6 +697,7 @@ NODE_CLASS_MAPPINGS = {
     "ArrssenneSwitchFromAny3": SwitchFromAny3,
     "ArrssenneCkptSeedFilename": CkptSeedFilename,
     "ArrssenneLoader": Loader,
+    "ArrssenneLoaderCkpt": LoaderCkpt,
     "ArrssenneLoadImageFace": LoadImageFace,
     "ArrssenneCardOverlay": CardOverlay,
 }
@@ -630,6 +707,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ArrssenneSwitchFromAny3": "Switch from any 3-way (Arrssenne)",
     "ArrssenneCkptSeedFilename": "Filename ckpt+seed (Arrssenne)",
     "ArrssenneLoader": "Loader ckpt+clip+vae+lora (Arrssenne)",
+    "ArrssenneLoaderCkpt": "Loader ckpt+lora (Arrssenne)",
     "ArrssenneLoadImageFace": "Load image FACE + path (Arrssenne)",
     "ArrssenneCardOverlay": "Card overlay (Arrssenne)",
 }
