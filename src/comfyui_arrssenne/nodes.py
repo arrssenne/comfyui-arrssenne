@@ -370,6 +370,105 @@ class LoaderCkpt:
         return model, clip, vae, cleaned, ckpt_name
 
 
+class LoaderSwitch:
+    """ArrssenneLoader with a source switch: the model comes either from the
+    `checkpoints` folder (load_checkpoint_guess_config, same as
+    ArrssenneLoader) or from the `diffusion_models` folder
+    (comfy.sd.load_diffusion_model, same as the builtin UNETLoader). Only the
+    file of the selected source is loaded; the other list is ignored.
+
+    Why diffusion_models: load_diffusion_model strips the
+    "model.diffusion_model." prefix BEFORE matching `_quantization_metadata`
+    layer names, so quantized files (INT8 convrot, FP8 scaled, NVFP4...)
+    load correctly with or without that prefix. load_checkpoint_guess_config
+    does not, and a prefixed quantized file loads as raw INT8 -> pure noise.
+
+    Outputs: MODEL, CLIP, VAE, text (LoRA tags stripped), checkpoint_name
+    (raw file name of the selected model) — same signature as
+    ArrssenneLoader, drop-in swappable.
+
+    Original node, written on ComfyUI builtin APIs.
+    """
+
+    CATEGORY = "Arrssenne/Loaders"
+    SOURCES = ["checkpoints", "diffusion_models"]
+    NONE = "(aucun)"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        import folder_paths
+        from nodes import CLIPLoader as _CLIPLoader, VAELoader as _VAELoader
+
+        try:
+            clip_types = list(_CLIPLoader.INPUT_TYPES()["required"]["type"][0])
+        except Exception:
+            clip_types = ["stable_diffusion"]
+        try:
+            vae_names = list(_VAELoader.INPUT_TYPES()["required"]["vae_name"][0])
+        except Exception:
+            vae_names = folder_paths.get_filename_list("vae")
+
+        # the unused list must never be empty, or ComfyUI's validation fails
+        ckpts = folder_paths.get_filename_list("checkpoints") or [cls.NONE]
+        unets = folder_paths.get_filename_list("diffusion_models") or [cls.NONE]
+
+        return {
+            "required": {
+                "source": (cls.SOURCES,),
+                "ckpt_name": (ckpts,),
+                "unet_name": (unets,),
+                "clip_name": (folder_paths.get_filename_list("text_encoders"),),
+                "clip_type": (clip_types,),
+                "vae_name": (vae_names,),
+                "text": ("STRING", {"forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE", "STRING", "STRING")
+    RETURN_NAMES = ("MODEL", "CLIP", "VAE", "text", "checkpoint_name")
+    FUNCTION = "execute"
+
+    def execute(self, source, ckpt_name, unet_name, clip_name, clip_type, vae_name, text):
+        import comfy.sd
+        import folder_paths
+        from nodes import CLIPLoader, VAELoader, LoraLoader
+
+        if source == "diffusion_models":
+            name = unet_name
+            if name == self.NONE:
+                raise RuntimeError("Arrssenne Loader switch: aucun fichier dans diffusion_models.")
+            model = comfy.sd.load_diffusion_model(
+                folder_paths.get_full_path_or_raise("diffusion_models", name)
+            )
+        else:
+            name = ckpt_name
+            if name == self.NONE:
+                raise RuntimeError("Arrssenne Loader switch: aucun fichier dans checkpoints.")
+            model = comfy.sd.load_checkpoint_guess_config(
+                folder_paths.get_full_path_or_raise("checkpoints", name),
+                output_vae=False,
+                output_clip=False,
+                embedding_directory=folder_paths.get_folder_paths("embeddings"),
+            )[0]
+
+        clip = CLIPLoader().load_clip(clip_name, type=clip_type)[0]
+        vae = VAELoader().load_vae(vae_name)[0]
+
+        tags, cleaned = parse_lora_tags(text)
+        if tags:
+            lora_files = folder_paths.get_filename_list("loras")
+            lora_loader = LoraLoader()
+            for tag_name, sm, sc in tags:
+                lora_file = resolve_lora_file(tag_name, lora_files)
+                if lora_file is None:
+                    logger.warning("Arrssenne Loader switch: LoRA introuvable, tag ignore: <lora:%s>", tag_name)
+                    continue
+                model, clip = lora_loader.load_lora(model, clip, lora_file, sm, sc)
+                logger.info("Arrssenne Loader switch: LoRA applique: %s (model=%s, clip=%s)", lora_file, sm, sc)
+
+        return model, clip, vae, cleaned, name
+
+
 def face_image_stem(image):
     """Extract the bare name (no folder, no extension, no ComfyUI
     " [input]"/" [output]"/" [temp]" annotation) from a LoadImage widget
@@ -760,6 +859,7 @@ NODE_CLASS_MAPPINGS = {
     "ArrssenneCkptSeedFilename": CkptSeedFilename,
     "ArrssenneLoader": Loader,
     "ArrssenneLoaderCkpt": LoaderCkpt,
+    "ArrssenneLoaderSwitch": LoaderSwitch,
     "ArrssenneLoadImageFace": LoadImageFace,
     "ArrssenneCardOverlay": CardOverlay,
     "ArrssenneEmptyLatentPreset": EmptyLatentPreset,
@@ -771,6 +871,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ArrssenneCkptSeedFilename": "Filename ckpt+seed (Arrssenne)",
     "ArrssenneLoader": "Loader ckpt+clip+vae+lora (Arrssenne)",
     "ArrssenneLoaderCkpt": "Loader ckpt+lora (Arrssenne)",
+    "ArrssenneLoaderSwitch": "Loader ckpt/diffusion switch+clip+vae+lora (Arrssenne)",
     "ArrssenneLoadImageFace": "Load image FACE + path (Arrssenne)",
     "ArrssenneCardOverlay": "Card overlay (Arrssenne)",
     "ArrssenneEmptyLatentPreset": "Empty Latent presets (Arrssenne)",
